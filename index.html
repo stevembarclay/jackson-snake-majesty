@@ -2,11 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Jackson's Shrinking Snake Arena</title>
+    <title>Jackson's Neon Snake Arena</title>
     <style>
+        :root {
+            --neon-green: #39ff14;
+            --neon-pink: #ff00ff;
+            --bg-dark: #050505;
+        }
         body {
             margin: 0;
-            background-color: #111;
+            background-color: var(--bg-dark);
             color: white;
             display: flex;
             flex-direction: column;
@@ -16,220 +21,301 @@
             font-family: 'Courier New', Courier, monospace;
             overflow: hidden;
         }
-        canvas {
-            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
-            background-color: #000;
+        #gameContainer {
+            position: relative;
+            width: 600px;
+            height: 600px;
+            box-shadow: 0 0 30px rgba(57, 255, 20, 0.3);
         }
-        #ui {
+        canvas {
+            background-color: #000;
+            display: block;
+        }
+        #ui, #gameOverScreen {
             position: absolute;
-            top: 20px;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             text-align: center;
             pointer-events: none;
         }
-        h1 { margin: 0; font-size: 24px; color: #0f0; text-shadow: 0 0 10px #0f0; }
-        p { margin: 5px 0; color: #aaa; }
+        #ui { justify-content: flex-start; padding-top: 20px; }
+        
+        #gameOverScreen {
+            background: rgba(5, 5, 5, 0.85);
+            backdrop-filter: blur(5px);
+            z-index: 10;
+        }
+        
+        h1 { margin: 0; font-size: 32px; color: var(--neon-green); text-shadow: 0 0 15px var(--neon-green); text-transform: uppercase; letter-spacing: 2px;}
+        h2 { font-size: 24px; color: var(--neon-pink); text-shadow: 0 0 10px var(--neon-pink); margin-bottom: 30px;}
+        p { margin: 5px 0; color: #aaa; font-weight: bold;}
+        
+        .hidden { display: none !important; }
     </style>
 </head>
-<body>
+<body onload="initGame()">
 
-    <div id="ui">
-        <h1 id="scoreDisplay">SCORE: 0 / 20</h1>
-        <p>Use ARROW KEYS to move. Don't hit the red walls!</p>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="ui">
+            <h1 id="scoreDisplay">SCORE: 0 / 20</h1>
+        </div>
+
+        
+        <div id="gameOverScreen" class="hidden">
+            <h1 id="gameOverTitle">GAME OVER</h1>
+            <h2 id="gameOverReason"></h2>
+            <h2 style="color: var(--neon-green);">RELOAD IN 3 SECONDS...</h2> 
+        </div>
     </div>
-    <canvas id="gameCanvas"></canvas>
 
 <script>
     // --- CONFIGURATION ---
     const CANVAS_SIZE = 600;
-    const GRID_SIZE = 20;
-    const WIN_SCORE = 20; // UPDATED TO 20
+    const GRID_SIZE = 25; 
+    const GRID_COUNT = CANVAS_SIZE / GRID_SIZE;
+    const WIN_SCORE = 20;
+    const GAME_SPEED_MS = 110;
     
-    // --- SETUP ---
+    // --- DOM ELEMENTS ---
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreDisplay = document.getElementById('scoreDisplay');
+    const ui = document.getElementById('ui');
+    const gameOverScreen = document.getElementById('gameOverScreen');
     
     canvas.width = CANVAS_SIZE;
     canvas.height = CANVAS_SIZE;
 
-    // Game State
-    let snake = [{x: 10, y: 10}]; 
-    let velocity = {x: 0, y: 0};
-    let food = {x: 15, y: 15};
-    let score = 0;
-    let gameRunning = true;
-    let particles = [];
-    
-    // The Arena Borders (In grid units)
-    let arena = {
-        minX: 0,
-        maxX: CANVAS_SIZE / GRID_SIZE,
-        minY: 0,
-        maxY: CANVAS_SIZE / GRID_SIZE
-    };
+    // --- GAME STATE VARIABLES ---
+    let gameState = 'PLAYING';
+    let snake, velocity, food, score, particles, arena;
 
-    // --- INPUT ---
-    document.addEventListener('keydown', (e) => {
-        if (!gameRunning && e.key === ' ') window.location.reload(); 
+    // --- INITIALIZATION ---
+    // Called automatically when the body loads (onload="initGame()")
+    function initGame() {
+        snake = [{x: Math.floor(GRID_COUNT/2), y: Math.floor(GRID_COUNT/2)}]; 
+        velocity = {x: 1, y: 0}; 
+        score = 0;
+        particles = [];
+        arena = { minX: 0, maxX: GRID_COUNT, minY: 0, maxY: GRID_COUNT };
+        scoreDisplay.innerText = `SCORE: 0 / ${WIN_SCORE}`;
+        placeFood();
+        gameState = 'PLAYING';
         
-        switch(e.key) {
-            case 'ArrowUp':    if (velocity.y === 0) velocity = {x: 0, y: -1}; break;
-            case 'ArrowDown':  if (velocity.y === 0) velocity = {x: 0, y: 1}; break;
-            case 'ArrowLeft':  if (velocity.x === 0) velocity = {x: -1, y: 0}; break;
-            case 'ArrowRight': if (velocity.x === 0) velocity = {x: 1, y: 0}; break;
+        gameOverScreen.classList.add('hidden');
+        ui.classList.remove('hidden');
+
+        // Start the continuous game loop (if not already running)
+        if (!window.gameLoopInterval) {
+            window.gameLoopInterval = setInterval(gameLoop, GAME_SPEED_MS); 
+        }
+    }
+
+    // --- INPUT (WASD) ---
+    document.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+        
+        // This line ensures WASD is only processed when the game is active.
+        if (gameState !== 'PLAYING') return;
+
+        // Ensure the snake cannot immediately reverse into itself
+        switch(key) {
+            case 'w': 
+                if (velocity.y === 1) return; // Cannot move up if currently moving down
+                velocity = {x: 0, y: -1}; 
+                break;
+            case 's': 
+                if (velocity.y === -1) return; // Cannot move down if currently moving up
+                velocity = {x: 0, y: 1}; 
+                break;
+            case 'a': 
+                if (velocity.x === 1) return; // Cannot move left if currently moving right
+                velocity = {x: -1, y: 0}; 
+                break;
+            case 'd': 
+                if (velocity.x === -1) return; // Cannot move right if currently moving left
+                velocity = {x: 1, y: 0}; 
+                break;
         }
     });
 
-    // --- GAME LOGIC ---
-    function update() {
-        if (!gameRunning) return;
+    // --- MAIN GAME LOOP ---
+    function gameLoop() {
+        if (gameState === 'PLAYING') {
+            update();
+        }
+        draw();
+    }
 
-        // Move Snake
+    // --- LOGIC UPDATE ---
+    function update() {
+
         const head = {x: snake[0].x + velocity.x, y: snake[0].y + velocity.y};
 
-        // Check Wall Collision (The shrinking walls!)
+        // Check Wall Collision
         if (head.x < arena.minX || head.x >= arena.maxX || 
             head.y < arena.minY || head.y >= arena.maxY) {
             gameOver("CRASHED INTO THE WALL!");
             return;
         }
 
-        // Check Self Collision
-        for (let segment of snake) {
-            if (head.x === segment.x && head.y === segment.y && (velocity.x !==0 || velocity.y !==0)) {
-                gameOver("YOU ATE YOURSELF!");
+        // Check Self Collision (starts check from index 1)
+        for (let i = 1; i < snake.length; i++) {
+            if (head.x === snake[i].x && head.y === snake[i].y) {
+                gameOver("YOU BIT YOURSELF!");
                 return;
             }
         }
 
-        snake.unshift(head); // Add new head
+        snake.unshift(head);
 
         // Check Food Collision
         if (head.x === food.x && head.y === food.y) {
             score++;
             scoreDisplay.innerText = `SCORE: ${score} / ${WIN_SCORE}`;
-            createParticles(head.x * GRID_SIZE, head.y * GRID_SIZE, '#0f0');
+            createParticles(head.x * GRID_SIZE, head.y * GRID_SIZE, '#ff00ff');
             
-            // SHRINK THE ARENA!
-            // Every point shrinks the arena by 1 row or column
+            // Shrink mechanics
             if (score % 2 === 0) {
-                // Shrink horizontally
-                if (Math.random() > 0.5) arena.minX++; 
-                else arena.maxX--;
+                if (Math.random() > 0.5) arena.minX++; else arena.maxX--;
             } else {
-                // Shrink vertically
-                if (Math.random() > 0.5) arena.minY++; 
-                else arena.maxY--;
+                if (Math.random() > 0.5) arena.minY++; else arena.maxY--;
             }
 
-            // Win Condition
             if (score >= WIN_SCORE) {
-                gameRunning = false;
-                scoreDisplay.innerText = "YOU WON! AMAZING!";
-                scoreDisplay.style.color = "#ffff00";
+                gameOver("YOU WON! AMAZING!", true);
                 return;
             }
-
             placeFood();
         } else {
-            snake.pop(); // Remove tail if no food eaten
+            snake.pop(); 
         }
 
         // Update Particles
         particles.forEach((p, index) => {
-            p.x += p.vx;
-            p.y += p.vy;
-            p.life -= 0.05;
+            p.x += p.vx; p.y += p.vy; p.life -= 0.05;
             if (p.life <= 0) particles.splice(index, 1);
         });
     }
 
+    // --- HELPER FUNCTIONS ---
     function placeFood() {
-        // Find a random spot INSIDE the current arena
         let valid = false;
         while (!valid) {
             food.x = Math.floor(Math.random() * (arena.maxX - arena.minX)) + arena.minX;
             food.y = Math.floor(Math.random() * (arena.maxY - arena.minY)) + arena.minY;
-            
-            // Don't spawn on snake
             valid = !snake.some(s => s.x === food.x && s.y === food.y);
         }
     }
 
     function createParticles(x, y, color) {
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 12; i++) {
             particles.push({
-                x: x + 10, y: y + 10,
-                vx: (Math.random() - 0.5) * 5,
-                vy: (Math.random() - 0.5) * 5,
-                life: 1.0,
-                color: color
+                x: x + GRID_SIZE/2, y: y + GRID_SIZE/2,
+                vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8,
+                life: 1.0, color: color
             });
         }
     }
 
-    function gameOver(reason) {
-        gameRunning = false;
-        scoreDisplay.innerText = reason + " PRESS SPACE TO RESTART";
-        scoreDisplay.style.color = "#ff0000";
+    function gameOver(reason, won = false) {
+        gameState = 'GAMEOVER';
+        ui.classList.add('hidden');
+        gameOverScreen.classList.remove('hidden');
+        document.getElementById('gameOverTitle').innerText = won ? "VICTORY!" : "GAME OVER";
+        document.getElementById('gameOverTitle').style.color = won ? "var(--neon-green)" : "red";
+        document.getElementById('gameOverReason').innerText = reason;
+        
+        // Auto-restart by reloading the page after 3 seconds
+        setTimeout(() => {
+             window.location.reload();
+        }, 3000);
     }
 
     // --- DRAWING ---
     function draw() {
-        // Clear Screen
-        ctx.fillStyle = '#000';
+        // 1. Clear Screen & Draw Background Grid
+        ctx.fillStyle = '#050505';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawGrid();
 
-        // Draw The Shrinking Arena Danger Zone (Red Borders)
-        ctx.strokeStyle = '#333'; // Grid lines
+        // 2. Draw The Danger Zone & Safe Zone
+        const safeX = arena.minX * GRID_SIZE;
+        const safeY = arena.minY * GRID_SIZE;
+        const safeW = (arena.maxX - arena.minX) * GRID_SIZE;
+        const safeH = (arena.maxY - arena.minY) * GRID_SIZE;
         
-        // Draw the "Safe Zone" Background
         ctx.fillStyle = '#111';
-        const safeWidth = (arena.maxX - arena.minX) * GRID_SIZE;
-        const safeHeight = (arena.maxY - arena.minY) * GRID_SIZE;
-        ctx.fillRect(arena.minX * GRID_SIZE, arena.minY * GRID_SIZE, safeWidth, safeHeight);
-
-        // Draw Danger Borders
-        ctx.strokeStyle = '#f00';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(
-            arena.minX * GRID_SIZE, 
-            arena.minY * GRID_SIZE, 
-            safeWidth, 
-            safeHeight
-        );
-
-        // Draw Snake
-        snake.forEach((segment, index) => {
-            ctx.fillStyle = index === 0 ? '#0f0' : '#0a0'; // Head is brighter
-            ctx.shadowBlur = index === 0 ? 15 : 0;
-            ctx.shadowColor = '#0f0';
-            ctx.fillRect(segment.x * GRID_SIZE, segment.y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2);
-            ctx.shadowBlur = 0;
-        });
-
-        // Draw Food
-        ctx.fillStyle = '#ff00ff';
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#ff00ff';
-        ctx.beginPath();
-        ctx.arc(food.x * GRID_SIZE + 10, food.y * GRID_SIZE + 10, 8, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillRect(safeX, safeY, safeW, safeH);
+        
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#ff0000';
+        ctx.strokeRect(safeX, safeY, safeW, safeH);
         ctx.shadowBlur = 0;
 
-        // Draw Particles
-        particles.forEach(p => {
-            ctx.fillStyle = `rgba(0, 255, 0, ${p.life})`;
-            ctx.fillRect(p.x, p.y, 4, 4);
+        // 3. Draw Snake
+        snake.forEach((segment, index) => {
+            drawSnakeSegment(segment, index === 0);
         });
+
+        // 4. Draw Food
+        drawFood();
+
+        // 5. Draw Particles
+        particles.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = p.life;
+            ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill();
+            ctx.globalAlpha = 1.0;
+        });
+
+        // 6. If Game Over, draw the dark overlay
+        if(gameState !== 'PLAYING') {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        }
     }
 
-    // --- LOOP ---
-    setInterval(() => {
-        update();
-        draw();
-    }, 100); 
-
+    // --- DRAWING UTILITIES ---
+    function drawSnakeSegment(segment, isHead) {
+        const x = segment.x * GRID_SIZE; const y = segment.y * GRID_SIZE; const size = GRID_SIZE;
+        ctx.fillStyle = isHead ? '#39ff14' : '#28a70f'; ctx.shadowBlur = isHead ? 15 : 5; ctx.shadowColor = '#39ff14';
+        ctx.beginPath(); ctx.roundRect(x + 1, y + 1, size - 2, size - 2, 5); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = isHead ? '#7cff63' : '#40c924';
+        ctx.beginPath(); ctx.roundRect(x + 5, y + 5, size - 10, size - 10, 3); ctx.fill();
+        if (isHead) { drawFace(x, y, size); }
+    }
+    function drawFace(x, y, size) {
+        ctx.fillStyle = 'white'; let eyeSize = 4; let offset = 5; let eye1x, eye1y, eye2x, eye2y;
+        if (velocity.x === 1) { eye1x = x + size - offset; eye1y = y + offset; eye2x = x + size - offset; eye2y = y + size - offset;} 
+        else if (velocity.x === -1) { eye1x = x + offset; eye1y = y + offset; eye2x = x + offset; eye2y = y + size - offset;} 
+        else if (velocity.y === -1) { eye1x = x + offset; eye1y = y + offset; eye2x = x + size - offset; eye2y = y + offset;} 
+        else { eye1x = x + offset; eye1y = y + size - offset; eye2x = x + size - offset; eye2y = y + size - offset;}
+        ctx.beginPath(); ctx.arc(eye1x, eye1y, eyeSize, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(eye2x, eye2y, eyeSize, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'black';
+        ctx.beginPath(); ctx.arc(eye1x, eye1y, eyeSize/2, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(eye2x, eye2y, eyeSize/2, 0, Math.PI*2); ctx.fill();
+    }
+    function drawFood() {
+        const cx = food.x * GRID_SIZE + GRID_SIZE / 2; const cy = food.y * GRID_SIZE + GRID_SIZE / 2;
+        ctx.fillStyle = '#ff00ff'; ctx.shadowBlur = 20; ctx.shadowColor = '#ff00ff'; ctx.beginPath();
+        const pulse = Math.sin(Date.now() / 200) * 2; ctx.arc(cx, cy, GRID_SIZE / 2 - 4 + pulse, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+    }
+    function drawGrid() {
+        ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1;
+        for (let i = 0; i <= GRID_COUNT; i++) {
+            ctx.beginPath(); ctx.moveTo(i * GRID_SIZE, 0); ctx.lineTo(i * GRID_SIZE, CANVAS_SIZE); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, i * GRID_SIZE); ctx.lineTo(CANVAS_SIZE, i * GRID_SIZE); ctx.stroke();
+        }
+    }
 </script>
 </body>
 </html>
