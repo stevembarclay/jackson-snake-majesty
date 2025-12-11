@@ -21,6 +21,7 @@
             font-family: 'Courier New', Courier, monospace;
             overflow: hidden;
         }
+        /* Game Container to hold canvas and UI */
         #gameContainer {
             position: relative;
             width: 600px;
@@ -31,6 +32,7 @@
             background-color: #000;
             display: block;
         }
+        /* UI Overlays */
         #ui, #introScreen, #gameOverScreen {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -39,19 +41,20 @@
             align-items: center;
             justify-content: center;
             text-align: center;
-            pointer-events: none;
+            pointer-events: none; /* Let clicks pass through unless it's a button */
         }
         #ui { justify-content: flex-start; padding-top: 20px; }
         
+        /* Intro & Game Over specific styling */
         #introScreen, #gameOverScreen {
             background: rgba(5, 5, 5, 0.85);
             backdrop-filter: blur(5px);
-            pointer-events: auto; /* Re-enabled for button/click interaction */
+            pointer-events: auto; /* Capture clicks here */
             z-index: 10;
         }
         
         h1 { margin: 0; font-size: 32px; color: var(--neon-green); text-shadow: 0 0 15px var(--neon-green); text-transform: uppercase; letter-spacing: 2px;}
-        h2 { margin: 15px 0; font-size: 24px; color: var(--neon-pink); text-shadow: 0 0 10px var(--neon-pink); }
+        h2 { font-size: 24px; color: var(--neon-pink); text-shadow: 0 0 10px var(--neon-pink); margin-bottom: 30px;}
         p { margin: 5px 0; color: #aaa; font-weight: bold;}
 
         button {
@@ -64,7 +67,6 @@
             cursor: pointer;
             box-shadow: 0 0 10px var(--neon-green), inset 0 0 10px var(--neon-green);
             transition: all 0.2s;
-            pointer-events: auto;
         }
         button:hover {
             background: var(--neon-green);
@@ -72,6 +74,7 @@
             box-shadow: 0 0 30px var(--neon-green), inset 0 0 20px var(--neon-green);
         }
         
+        /* Utility classes to hide/show screens */
         .hidden { display: none !important; }
     </style>
 </head>
@@ -103,7 +106,7 @@
 <script>
     // --- CONFIGURATION ---
     const CANVAS_SIZE = 600;
-    const GRID_SIZE = 25; 
+    const GRID_SIZE = 25; // Slightly bigger snake for texture details
     const GRID_COUNT = CANVAS_SIZE / GRID_SIZE;
     const WIN_SCORE = 20;
     const GAME_SPEED_MS = 110;
@@ -122,13 +125,14 @@
     canvas.height = CANVAS_SIZE;
 
     // --- GAME STATE VARIABLES ---
-    let gameState = 'INTRO'; // Start state is INTRO
+    let gameState = 'INTRO'; // 'INTRO', 'PLAYING', 'GAMEOVER'
     let snake, velocity, food, score, particles, arena;
+    let gameLoopInterval;
 
     // --- INITIALIZATION ---
     function initGame() {
         snake = [{x: Math.floor(GRID_COUNT/2), y: Math.floor(GRID_COUNT/2)}]; 
-        velocity = {x: 1, y: 0}; 
+        velocity = {x: 1, y: 0}; // Start moving right
         score = 0;
         particles = [];
         arena = { minX: 0, maxX: GRID_COUNT, minY: 0, maxY: GRID_COUNT };
@@ -136,76 +140,65 @@
         placeFood();
         gameState = 'PLAYING';
         
+        // UI Cleanup
         introScreen.classList.add('hidden');
         gameOverScreen.classList.add('hidden');
         ui.classList.remove('hidden');
+        
+        if(gameLoopInterval) clearInterval(gameLoopInterval);
+        gameLoopInterval = setInterval(gameLoop, GAME_SPEED_MS);
     }
-    
-    // --- EVENT LISTENERS ---
-    
-    // 1. START/RESTART BUTTONS
+
+    // Button Event Listeners
     startBtn.addEventListener('click', initGame);
     restartBtn.addEventListener('click', initGame);
 
-    // 2. WASD CONTROLS
+    // --- INPUT (WASD) ---
     document.addEventListener('keydown', (e) => {
-        const key = e.key.toLowerCase();
-        
-        // This line ensures WASD is only processed when the game is active.
         if (gameState !== 'PLAYING') return;
 
-        // Ensure the snake cannot immediately reverse into itself
-        switch(key) {
-            case 'w': 
-                if (velocity.y === 1) return; 
-                velocity = {x: 0, y: -1}; 
-                break;
-            case 's': 
-                if (velocity.y === -1) return; 
-                velocity = {x: 0, y: 1}; 
-                break;
-            case 'a': 
-                if (velocity.x === 1) return; 
-                velocity = {x: -1, y: 0}; 
-                break;
-            case 'd': 
-                if (velocity.x === -1) return; 
-                velocity = {x: 1, y: 0}; 
-                break;
+        // Using toLowerCase() handles both 'w' and 'W'
+        switch(e.key.toLowerCase()) {
+            case 'w': if (velocity.y === 0) velocity = {x: 0, y: -1}; break;
+            case 's': if (velocity.y === 0) velocity = {x: 0, y: 1}; break;
+            case 'a': if (velocity.x === 0) velocity = {x: -1, y: 0}; break;
+            case 'd': if (velocity.x === 0) velocity = {x: 1, y: 0}; break;
         }
     });
 
     // --- MAIN GAME LOOP ---
     function gameLoop() {
-        if (gameState === 'PLAYING') {
-            update();
-        }
+        update();
         draw();
     }
 
     // --- LOGIC UPDATE ---
     function update() {
+        if (gameState !== 'PLAYING') return;
 
+        // 1. Calculate new head position
         const head = {x: snake[0].x + velocity.x, y: snake[0].y + velocity.y};
 
-        // Check Wall Collision
+        // 2. Check Wall Collision (The shrinking arena walls)
         if (head.x < arena.minX || head.x >= arena.maxX || 
             head.y < arena.minY || head.y >= arena.maxY) {
             gameOver("CRASHED INTO THE WALL!");
             return;
         }
 
-        // Check Self Collision
-        for (let i = 1; i < snake.length; i++) {
+        // 3. Check Self Collision
+        for (let i = 0; i < snake.length; i++) {
             if (head.x === snake[i].x && head.y === snake[i].y) {
+                 // Ignore immediate reverse clash which is prevented by input logic
                 gameOver("YOU BIT YOURSELF!");
                 return;
             }
         }
 
+        // 4. Move Snake (Add new head)
         snake.unshift(head);
 
-        // Check Food Collision
+        // 5. Check Food Collision
         if (head.x === food.x && head.y === food.y) {
             score++;
             scoreDisplay.innerText = `SCORE: ${score} / ${WIN_SCORE}`;
@@ -218,12 +211,14 @@
                 if (Math.random() > 0.5) arena.minY++; else arena.maxY--;
             }
 
+            // Win Condition
             if (score >= WIN_SCORE) {
                 gameOver("YOU WON! AMAZING!", true);
                 return;
             }
             placeFood();
         } else {
+            // If no food eaten, remove tail to maintain length
             snake.pop(); 
         }
 
@@ -238,8 +233,10 @@
     function placeFood() {
         let valid = false;
         while (!valid) {
+            // Try placing food within current arena bounds
             food.x = Math.floor(Math.random() * (arena.maxX - arena.minX)) + arena.minX;
             food.y = Math.floor(Math.random() * (arena.maxY - arena.minY)) + arena.minY;
+            // Ensure it's not inside the snake body
             valid = !snake.some(s => s.x === food.x && s.y === food.y);
         }
     }
@@ -256,6 +253,7 @@
 
     function gameOver(reason, won = false) {
         gameState = 'GAMEOVER';
+        clearInterval(gameLoopInterval);
         ui.classList.add('hidden');
         gameOverScreen.classList.remove('hidden');
         document.getElementById('gameOverTitle').innerText = won ? "VICTORY!" : "GAME OVER";
@@ -276,9 +274,11 @@
         const safeW = (arena.maxX - arena.minX) * GRID_SIZE;
         const safeH = (arena.maxY - arena.minY) * GRID_SIZE;
         
+        // Fill safe zone slightly lighter
         ctx.fillStyle = '#111';
         ctx.fillRect(safeX, safeY, safeW, safeH);
         
+        // Draw glowing red border around safe zone
         ctx.strokeStyle = '#ff0000';
         ctx.lineWidth = 3;
         ctx.shadowBlur = 20;
@@ -286,15 +286,13 @@
         ctx.strokeRect(safeX, safeY, safeW, safeH);
         ctx.shadowBlur = 0;
 
-        // 3. Draw Snake (Only if playing or game over)
-        if (gameState !== 'INTRO') {
-            snake.forEach((segment, index) => {
-                drawSnakeSegment(segment, index === 0);
-            });
+        // 3. Draw Snake (With texture and face!)
+        snake.forEach((segment, index) => {
+            drawSnakeSegment(segment, index === 0);
+        });
 
-            // 4. Draw Food
-            drawFood();
-        }
+        // 4. Draw Food
+        drawFood();
 
         // 5. Draw Particles
         particles.forEach(p => {
@@ -304,47 +302,97 @@
             ctx.globalAlpha = 1.0;
         });
 
-        // 6. Draw Intro animation if in INTRO state
+        // 6. Draw Intro animation if state is INTRO
         if(gameState === 'INTRO') {
              drawIntroAnimation();
         }
     }
 
-    // --- DRAWING UTILITIES ---
     function drawSnakeSegment(segment, isHead) {
-        const x = segment.x * GRID_SIZE; const y = segment.y * GRID_SIZE; const size = GRID_SIZE;
-        ctx.fillStyle = isHead ? '#39ff14' : '#28a70f'; ctx.shadowBlur = isHead ? 15 : 5; ctx.shadowColor = '#39ff14';
-        ctx.beginPath(); ctx.roundRect(x + 1, y + 1, size - 2, size - 2, 5); ctx.fill(); ctx.shadowBlur = 0;
+        const x = segment.x * GRID_SIZE;
+        const y = segment.y * GRID_SIZE;
+        const size = GRID_SIZE;
+
+        // Main Body Color
+        ctx.fillStyle = isHead ? '#39ff14' : '#28a70f'; 
+        ctx.shadowBlur = isHead ? 15 : 5;
+        ctx.shadowColor = '#39ff14';
+        // Draw rounded rect for segment
+        ctx.beginPath();
+        ctx.roundRect(x + 1, y + 1, size - 2, size - 2, 5);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // "Texture" - lighter center to make it look like a scale
         ctx.fillStyle = isHead ? '#7cff63' : '#40c924';
-        ctx.beginPath(); ctx.roundRect(x + 5, y + 5, size - 10, size - 10, 3); ctx.fill();
-        if (isHead) { drawFace(x, y, size); }
+        ctx.beginPath();
+        ctx.roundRect(x + 5, y + 5, size - 10, size - 10, 3);
+        ctx.fill();
+
+        // If it's the head, draw the face
+        if (isHead) {
+            drawFace(x, y, size);
+        }
     }
+
     function drawFace(x, y, size) {
-        ctx.fillStyle = 'white'; let eyeSize = 4; let offset = 5; let eye1x, eye1y, eye2x, eye2y;
-        if (velocity.x === 1) { eye1x = x + size - offset; eye1y = y + offset; eye2x = x + size - offset; eye2y = y + size - offset;} 
-        else if (velocity.x === -1) { eye1x = x + offset; eye1y = y + offset; eye2x = x + offset; eye2y = y + size - offset;} 
-        else if (velocity.y === -1) { eye1x = x + offset; eye1y = y + offset; eye2x = x + size - offset; eye2y = y + offset;} 
-        else { eye1x = x + offset; eye1y = y + size - offset; eye2x = x + size - offset; eye2y = y + size - offset;}
+        ctx.fillStyle = 'white';
+        let eyeSize = 4;
+        let offset = 5;
+
+        // Determine eye position based on velocity
+        let eye1x, eye1y, eye2x, eye2y;
+
+        if (velocity.x === 1) { // Moving Right
+            eye1x = x + size - offset; eye1y = y + offset;
+            eye2x = x + size - offset; eye2y = y + size - offset;
+        } else if (velocity.x === -1) { // Moving Left
+            eye1x = x + offset; eye1y = y + offset;
+            eye2x = x + offset; eye2y = y + size - offset;
+        } else if (velocity.y === -1) { // Moving Up
+            eye1x = x + offset; eye1y = y + offset;
+            eye2x = x + size - offset; eye2y = y + offset;
+        } else { // Moving Down
+            eye1x = x + offset; eye1y = y + size - offset;
+            eye2x = x + size - offset; eye2y = y + size - offset;
+        }
+
+        // Draw whites of eyes
         ctx.beginPath(); ctx.arc(eye1x, eye1y, eyeSize, 0, Math.PI*2); ctx.fill();
         ctx.beginPath(); ctx.arc(eye2x, eye2y, eyeSize, 0, Math.PI*2); ctx.fill();
+        
+        // Draw pupils (black dots)
         ctx.fillStyle = 'black';
         ctx.beginPath(); ctx.arc(eye1x, eye1y, eyeSize/2, 0, Math.PI*2); ctx.fill();
         ctx.beginPath(); ctx.arc(eye2x, eye2y, eyeSize/2, 0, Math.PI*2); ctx.fill();
     }
+
     function drawFood() {
-        const cx = food.x * GRID_SIZE + GRID_SIZE / 2; const cy = food.y * GRID_SIZE + GRID_SIZE / 2;
-        ctx.fillStyle = '#ff00ff'; ctx.shadowBlur = 20; ctx.shadowColor = '#ff00ff'; ctx.beginPath();
-        const pulse = Math.sin(Date.now() / 200) * 2; ctx.arc(cx, cy, GRID_SIZE / 2 - 4 + pulse, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+        const cx = food.x * GRID_SIZE + GRID_SIZE / 2;
+        const cy = food.y * GRID_SIZE + GRID_SIZE / 2;
+        ctx.fillStyle = '#ff00ff';
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#ff00ff';
+        ctx.beginPath();
+        // Make food pulse slightly
+        const pulse = Math.sin(Date.now() / 200) * 2;
+        ctx.arc(cx, cy, GRID_SIZE / 2 - 4 + pulse, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
     }
+
     function drawGrid() {
-        ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1;
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = 1;
         for (let i = 0; i <= GRID_COUNT; i++) {
             ctx.beginPath(); ctx.moveTo(i * GRID_SIZE, 0); ctx.lineTo(i * GRID_SIZE, CANVAS_SIZE); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(0, i * GRID_SIZE); ctx.lineTo(CANVAS_SIZE, i * GRID_SIZE); ctx.stroke();
         }
     }
+
     let introSnakeX = -GRID_SIZE;
     function drawIntroAnimation() {
+        // Just a simple snake moving across the background behind the menu
         introSnakeX += 5;
         if(introSnakeX > CANVAS_SIZE) introSnakeX = -100;
         
@@ -356,10 +404,9 @@
         }
         ctx.shadowBlur = 0;
     }
-    
-    // --- EXECUTION ---
-    // 1. Start the single continuous loop immediately to run the intro animation
-    window.gameLoopInterval = setInterval(gameLoop, GAME_SPEED_MS); 
+
+    // Start loop for intro animation immediately
+    setInterval(draw, GAME_SPEED_MS);
 
 </script>
 </body>
