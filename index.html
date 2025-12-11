@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Jackson's Shrinking Snake Arena</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+        }
+        canvas {
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
+            background-color: #000;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            text-align: center;
+            pointer-events: none;
+        }
+        h1 { margin: 0; font-size: 24px; color: #0f0; text-shadow: 0 0 10px #0f0; }
+        p { margin: 5px 0; color: #aaa; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h1 id="scoreDisplay">SCORE: 0 / 20</h1>
+        <p>Use ARROW KEYS to move. Don't hit the red walls!</p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+    // --- CONFIGURATION ---
+    const CANVAS_SIZE = 600;
+    const GRID_SIZE = 20;
+    const WIN_SCORE = 20; // UPDATED TO 20
+    
+    // --- SETUP ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    
+    canvas.width = CANVAS_SIZE;
+    canvas.height = CANVAS_SIZE;
+
+    // Game State
+    let snake = [{x: 10, y: 10}]; 
+    let velocity = {x: 0, y: 0};
+    let food = {x: 15, y: 15};
+    let score = 0;
+    let gameRunning = true;
+    let particles = [];
+    
+    // The Arena Borders (In grid units)
+    let arena = {
+        minX: 0,
+        maxX: CANVAS_SIZE / GRID_SIZE,
+        minY: 0,
+        maxY: CANVAS_SIZE / GRID_SIZE
+    };
+
+    // --- INPUT ---
+    document.addEventListener('keydown', (e) => {
+        if (!gameRunning && e.key === ' ') window.location.reload(); 
+        
+        switch(e.key) {
+            case 'ArrowUp':    if (velocity.y === 0) velocity = {x: 0, y: -1}; break;
+            case 'ArrowDown':  if (velocity.y === 0) velocity = {x: 0, y: 1}; break;
+            case 'ArrowLeft':  if (velocity.x === 0) velocity = {x: -1, y: 0}; break;
+            case 'ArrowRight': if (velocity.x === 0) velocity = {x: 1, y: 0}; break;
+        }
+    });
+
+    // --- GAME LOGIC ---
+    function update() {
+        if (!gameRunning) return;
+
+        // Move Snake
+        const head = {x: snake[0].x + velocity.x, y: snake[0].y + velocity.y};
+
+        // Check Wall Collision (The shrinking walls!)
+        if (head.x < arena.minX || head.x >= arena.maxX || 
+            head.y < arena.minY || head.y >= arena.maxY) {
+            gameOver("CRASHED INTO THE WALL!");
+            return;
+        }
+
+        // Check Self Collision
+        for (let segment of snake) {
+            if (head.x === segment.x && head.y === segment.y && (velocity.x !==0 || velocity.y !==0)) {
+                gameOver("YOU ATE YOURSELF!");
+                return;
+            }
+        }
+
+        snake.unshift(head); // Add new head
+
+        // Check Food Collision
+        if (head.x === food.x && head.y === food.y) {
+            score++;
+            scoreDisplay.innerText = `SCORE: ${score} / ${WIN_SCORE}`;
+            createParticles(head.x * GRID_SIZE, head.y * GRID_SIZE, '#0f0');
+            
+            // SHRINK THE ARENA!
+            // Every point shrinks the arena by 1 row or column
+            if (score % 2 === 0) {
+                // Shrink horizontally
+                if (Math.random() > 0.5) arena.minX++; 
+                else arena.maxX--;
+            } else {
+                // Shrink vertically
+                if (Math.random() > 0.5) arena.minY++; 
+                else arena.maxY--;
+            }
+
+            // Win Condition
+            if (score >= WIN_SCORE) {
+                gameRunning = false;
+                scoreDisplay.innerText = "YOU WON! AMAZING!";
+                scoreDisplay.style.color = "#ffff00";
+                return;
+            }
+
+            placeFood();
+        } else {
+            snake.pop(); // Remove tail if no food eaten
+        }
+
+        // Update Particles
+        particles.forEach((p, index) => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= 0.05;
+            if (p.life <= 0) particles.splice(index, 1);
+        });
+    }
+
+    function placeFood() {
+        // Find a random spot INSIDE the current arena
+        let valid = false;
+        while (!valid) {
+            food.x = Math.floor(Math.random() * (arena.maxX - arena.minX)) + arena.minX;
+            food.y = Math.floor(Math.random() * (arena.maxY - arena.minY)) + arena.minY;
+            
+            // Don't spawn on snake
+            valid = !snake.some(s => s.x === food.x && s.y === food.y);
+        }
+    }
+
+    function createParticles(x, y, color) {
+        for (let i = 0; i < 10; i++) {
+            particles.push({
+                x: x + 10, y: y + 10,
+                vx: (Math.random() - 0.5) * 5,
+                vy: (Math.random() - 0.5) * 5,
+                life: 1.0,
+                color: color
+            });
+        }
+    }
+
+    function gameOver(reason) {
+        gameRunning = false;
+        scoreDisplay.innerText = reason + " PRESS SPACE TO RESTART";
+        scoreDisplay.style.color = "#ff0000";
+    }
+
+    // --- DRAWING ---
+    function draw() {
+        // Clear Screen
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw The Shrinking Arena Danger Zone (Red Borders)
+        ctx.strokeStyle = '#333'; // Grid lines
+        
+        // Draw the "Safe Zone" Background
+        ctx.fillStyle = '#111';
+        const safeWidth = (arena.maxX - arena.minX) * GRID_SIZE;
+        const safeHeight = (arena.maxY - arena.minY) * GRID_SIZE;
+        ctx.fillRect(arena.minX * GRID_SIZE, arena.minY * GRID_SIZE, safeWidth, safeHeight);
+
+        // Draw Danger Borders
+        ctx.strokeStyle = '#f00';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(
+            arena.minX * GRID_SIZE, 
+            arena.minY * GRID_SIZE, 
+            safeWidth, 
+            safeHeight
+        );
+
+        // Draw Snake
+        snake.forEach((segment, index) => {
+            ctx.fillStyle = index === 0 ? '#0f0' : '#0a0'; // Head is brighter
+            ctx.shadowBlur = index === 0 ? 15 : 0;
+            ctx.shadowColor = '#0f0';
+            ctx.fillRect(segment.x * GRID_SIZE, segment.y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2);
+            ctx.shadowBlur = 0;
+        });
+
+        // Draw Food
+        ctx.fillStyle = '#ff00ff';
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ff00ff';
+        ctx.beginPath();
+        ctx.arc(food.x * GRID_SIZE + 10, food.y * GRID_SIZE + 10, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Draw Particles
+        particles.forEach(p => {
+            ctx.fillStyle = `rgba(0, 255, 0, ${p.life})`;
+            ctx.fillRect(p.x, p.y, 4, 4);
+        });
+    }
+
+    // --- LOOP ---
+    setInterval(() => {
+        update();
+        draw();
+    }, 100); 
+
+</script>
+</body>
+</html>
