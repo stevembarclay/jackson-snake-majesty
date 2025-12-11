@@ -31,7 +31,7 @@
             background-color: #000;
             display: block;
         }
-        #ui, #gameOverScreen {
+        #ui, #introScreen, #gameOverScreen {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
             display: flex;
@@ -43,33 +43,60 @@
         }
         #ui { justify-content: flex-start; padding-top: 20px; }
         
-        #gameOverScreen {
+        #introScreen, #gameOverScreen {
             background: rgba(5, 5, 5, 0.85);
             backdrop-filter: blur(5px);
+            pointer-events: auto; /* Re-enabled for button/click interaction */
             z-index: 10;
         }
         
         h1 { margin: 0; font-size: 32px; color: var(--neon-green); text-shadow: 0 0 15px var(--neon-green); text-transform: uppercase; letter-spacing: 2px;}
-        h2 { font-size: 24px; color: var(--neon-pink); text-shadow: 0 0 10px var(--neon-pink); margin-bottom: 30px;}
+        h2 { margin: 15px 0; font-size: 24px; color: var(--neon-pink); text-shadow: 0 0 10px var(--neon-pink); }
         p { margin: 5px 0; color: #aaa; font-weight: bold;}
+
+        button {
+            background: transparent;
+            border: 2px solid var(--neon-green);
+            color: var(--neon-green);
+            padding: 15px 30px;
+            font-size: 20px;
+            font-family: inherit;
+            cursor: pointer;
+            box-shadow: 0 0 10px var(--neon-green), inset 0 0 10px var(--neon-green);
+            transition: all 0.2s;
+            pointer-events: auto;
+        }
+        button:hover {
+            background: var(--neon-green);
+            color: black;
+            box-shadow: 0 0 30px var(--neon-green), inset 0 0 20px var(--neon-green);
+        }
         
         .hidden { display: none !important; }
     </style>
 </head>
-<body onload="initGame()">
+<body>
 
     <div id="gameContainer">
         <canvas id="gameCanvas"></canvas>
 
-        <div id="ui">
+        <div id="ui" class="hidden">
             <h1 id="scoreDisplay">SCORE: 0 / 20</h1>
         </div>
 
+        <div id="introScreen">
+            <h1>NEON ARENA SNAKE</h1>
+            <p>Use W A S D to move.</p>
+            <p>Eat food. The arena shrinks.</p>
+            <p>Get 20 points to win!</p>
+            <br>
+            <button id="startBtn">START GAME!</button>
+        </div>
         
         <div id="gameOverScreen" class="hidden">
             <h1 id="gameOverTitle">GAME OVER</h1>
             <h2 id="gameOverReason"></h2>
-            <h2 style="color: var(--neon-green);">RELOAD IN 3 SECONDS...</h2> 
+            <button id="restartBtn">PLAY AGAIN</button>
         </div>
     </div>
 
@@ -86,17 +113,19 @@
     const ctx = canvas.getContext('2d');
     const scoreDisplay = document.getElementById('scoreDisplay');
     const ui = document.getElementById('ui');
+    const introScreen = document.getElementById('introScreen');
     const gameOverScreen = document.getElementById('gameOverScreen');
+    const startBtn = document.getElementById('startBtn');
+    const restartBtn = document.getElementById('restartBtn');
     
     canvas.width = CANVAS_SIZE;
     canvas.height = CANVAS_SIZE;
 
     // --- GAME STATE VARIABLES ---
-    let gameState = 'PLAYING';
+    let gameState = 'INTRO'; // Start state is INTRO
     let snake, velocity, food, score, particles, arena;
 
     // --- INITIALIZATION ---
-    // Called automatically when the body loads (onload="initGame()")
     function initGame() {
         snake = [{x: Math.floor(GRID_COUNT/2), y: Math.floor(GRID_COUNT/2)}]; 
         velocity = {x: 1, y: 0}; 
@@ -107,16 +136,18 @@
         placeFood();
         gameState = 'PLAYING';
         
+        introScreen.classList.add('hidden');
         gameOverScreen.classList.add('hidden');
         ui.classList.remove('hidden');
-
-        // Start the continuous game loop (if not already running)
-        if (!window.gameLoopInterval) {
-            window.gameLoopInterval = setInterval(gameLoop, GAME_SPEED_MS); 
-        }
     }
+    
+    // --- EVENT LISTENERS ---
+    
+    // 1. START/RESTART BUTTONS
+    startBtn.addEventListener('click', initGame);
+    restartBtn.addEventListener('click', initGame);
 
-    // --- INPUT (WASD) ---
+    // 2. WASD CONTROLS
     document.addEventListener('keydown', (e) => {
         const key = e.key.toLowerCase();
         
@@ -126,19 +157,19 @@
         // Ensure the snake cannot immediately reverse into itself
         switch(key) {
             case 'w': 
-                if (velocity.y === 1) return; // Cannot move up if currently moving down
+                if (velocity.y === 1) return; 
                 velocity = {x: 0, y: -1}; 
                 break;
             case 's': 
-                if (velocity.y === -1) return; // Cannot move down if currently moving up
+                if (velocity.y === -1) return; 
                 velocity = {x: 0, y: 1}; 
                 break;
             case 'a': 
-                if (velocity.x === 1) return; // Cannot move left if currently moving right
+                if (velocity.x === 1) return; 
                 velocity = {x: -1, y: 0}; 
                 break;
             case 'd': 
-                if (velocity.x === -1) return; // Cannot move right if currently moving left
+                if (velocity.x === -1) return; 
                 velocity = {x: 1, y: 0}; 
                 break;
         }
@@ -164,7 +195,7 @@
             return;
         }
 
-        // Check Self Collision (starts check from index 1)
+        // Check Self Collision
         for (let i = 1; i < snake.length; i++) {
             if (head.x === snake[i].x && head.y === snake[i].y) {
                 gameOver("YOU BIT YOURSELF!");
@@ -230,11 +261,6 @@
         document.getElementById('gameOverTitle').innerText = won ? "VICTORY!" : "GAME OVER";
         document.getElementById('gameOverTitle').style.color = won ? "var(--neon-green)" : "red";
         document.getElementById('gameOverReason').innerText = reason;
-        
-        // Auto-restart by reloading the page after 3 seconds
-        setTimeout(() => {
-             window.location.reload();
-        }, 3000);
     }
 
     // --- DRAWING ---
@@ -260,13 +286,15 @@
         ctx.strokeRect(safeX, safeY, safeW, safeH);
         ctx.shadowBlur = 0;
 
-        // 3. Draw Snake
-        snake.forEach((segment, index) => {
-            drawSnakeSegment(segment, index === 0);
-        });
+        // 3. Draw Snake (Only if playing or game over)
+        if (gameState !== 'INTRO') {
+            snake.forEach((segment, index) => {
+                drawSnakeSegment(segment, index === 0);
+            });
 
-        // 4. Draw Food
-        drawFood();
+            // 4. Draw Food
+            drawFood();
+        }
 
         // 5. Draw Particles
         particles.forEach(p => {
@@ -276,10 +304,9 @@
             ctx.globalAlpha = 1.0;
         });
 
-        // 6. If Game Over, draw the dark overlay
-        if(gameState !== 'PLAYING') {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        // 6. Draw Intro animation if in INTRO state
+        if(gameState === 'INTRO') {
+             drawIntroAnimation();
         }
     }
 
@@ -316,6 +343,24 @@
             ctx.beginPath(); ctx.moveTo(0, i * GRID_SIZE); ctx.lineTo(CANVAS_SIZE, i * GRID_SIZE); ctx.stroke();
         }
     }
+    let introSnakeX = -GRID_SIZE;
+    function drawIntroAnimation() {
+        introSnakeX += 5;
+        if(introSnakeX > CANVAS_SIZE) introSnakeX = -100;
+        
+        ctx.fillStyle = '#39ff14';
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#39ff14';
+        for(let i=0; i<5; i++) {
+             ctx.fillRect(introSnakeX - (i*GRID_SIZE), CANVAS_SIZE/2, GRID_SIZE-2, GRID_SIZE-2);
+        }
+        ctx.shadowBlur = 0;
+    }
+    
+    // --- EXECUTION ---
+    // 1. Start the single continuous loop immediately to run the intro animation
+    window.gameLoopInterval = setInterval(gameLoop, GAME_SPEED_MS); 
+
 </script>
 </body>
 </html>
